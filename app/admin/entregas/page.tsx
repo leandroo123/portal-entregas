@@ -25,11 +25,21 @@ type EntregaAdmin = {
   tipo_entrega: string | null;
 };
 
+type ArchivoEntrega = {
+  id: string;
+  entrega_id: string;
+  nombre_archivo: string;
+  ruta_archivo: string;
+  tipo_archivo: string | null;
+  tamano_bytes: number | null;
+};
+
 export default function AdminEntregasPage() {
   const [autorizado, setAutorizado] = useState(false);
   const [clave, setClave] = useState("");
   const [errorClave, setErrorClave] = useState("");
   const [entregas, setEntregas] = useState<EntregaAdmin[]>([]);
+  const [archivos, setArchivos] = useState<ArchivoEntrega[]>([]);
   const [loading, setLoading] = useState(true);
   const [mensaje, setMensaje] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
@@ -39,16 +49,23 @@ export default function AdminEntregasPage() {
 
   async function cargarEntregas() {
     setLoading(true);
+    setErrorMsg("");
 
-    const { data, error } = await supabase
-      .from("vista_entregas_admin")
-      .select("*")
-      .order("fecha_entrega", { ascending: false });
+    const [entregasRes, archivosRes] = await Promise.all([
+      supabase.from("vista_entregas_admin").select("*").order("fecha_entrega", { ascending: false }),
+      supabase.from("archivos_entrega").select("*").order("created_at", { ascending: false }),
+    ]);
 
-    if (error) {
-      setErrorMsg(error.message);
+    if (entregasRes.error) {
+      setErrorMsg(entregasRes.error.message);
     } else {
-      setEntregas((data || []) as EntregaAdmin[]);
+      setEntregas((entregasRes.data || []) as EntregaAdmin[]);
+    }
+
+    if (archivosRes.error) {
+      setErrorMsg((prev) => prev || archivosRes.error.message);
+    } else {
+      setArchivos((archivosRes.data || []) as ArchivoEntrega[]);
     }
 
     setLoading(false);
@@ -96,6 +113,22 @@ export default function AdminEntregasPage() {
 
     setMensaje("Corrección guardada.");
     await cargarEntregas();
+  }
+
+  async function verArchivo(rutaArchivo: string, nombreArchivo: string) {
+    setMensaje("");
+    setErrorMsg("");
+
+    const { data, error } = await supabase.storage
+      .from("entregas")
+      .createSignedUrl(rutaArchivo, 60 * 10);
+
+    if (error || !data?.signedUrl) {
+      setErrorMsg(error?.message || "No se pudo generar el acceso al archivo.");
+      return;
+    }
+
+    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
   }
 
   const gruposUnicos = useMemo(() => {
@@ -271,7 +304,7 @@ export default function AdminEntregasPage() {
               </p>
               <h1 className="mt-2 text-3xl font-semibold">Entregas recibidas</h1>
               <p className="mt-2 text-slate-600">
-                Filtrá, corregí, puntuá y exportá la información.
+                Filtrá, corregí, puntuá, abrí archivos y exportá la información.
               </p>
             </div>
 
@@ -378,13 +411,21 @@ export default function AdminEntregasPage() {
               {filtradas.length === 0 ? (
                 <p className="text-slate-500">No hay entregas para mostrar.</p>
               ) : (
-                filtradas.map((e) => (
-                  <EntregaCard
-                    key={e.id}
-                    entrega={e}
-                    onGuardar={guardarCorreccion}
-                  />
-                ))
+                filtradas.map((e) => {
+                  const archivosDeEntrega = archivos.filter(
+                    (a) => a.entrega_id === e.id
+                  );
+
+                  return (
+                    <EntregaCard
+                      key={e.id}
+                      entrega={e}
+                      archivos={archivosDeEntrega}
+                      onGuardar={guardarCorreccion}
+                      onVerArchivo={verArchivo}
+                    />
+                  );
+                })
               )}
             </div>
           )}
@@ -396,15 +437,19 @@ export default function AdminEntregasPage() {
 
 function EntregaCard({
   entrega,
+  archivos,
   onGuardar,
+  onVerArchivo,
 }: {
   entrega: EntregaAdmin;
+  archivos: ArchivoEntrega[];
   onGuardar: (
     id: string,
     calificacion: string,
     respuesta: string,
     estado: string
   ) => Promise<void>;
+  onVerArchivo: (rutaArchivo: string, nombreArchivo: string) => Promise<void>;
 }) {
   const [calificacion, setCalificacion] = useState(
     entrega.calificacion?.toString() || ""
@@ -442,6 +487,27 @@ function EntregaCard({
               ? new Date(entrega.fecha_limite).toLocaleString("es-UY")
               : "-"}
           </p>
+
+          <div className="mt-4 space-y-2">
+            <p className="text-sm font-medium text-slate-700">Archivos del alumno</p>
+
+            {archivos.length === 0 ? (
+              <p className="text-sm text-slate-500">No hay archivo adjunto.</p>
+            ) : (
+              archivos.map((archivo) => (
+                <button
+                  key={archivo.id}
+                  type="button"
+                  onClick={() =>
+                    onVerArchivo(archivo.ruta_archivo, archivo.nombre_archivo)
+                  }
+                  className="block rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+                >
+                  Ver archivo: {archivo.nombre_archivo}
+                </button>
+              ))
+            )}
+          </div>
         </div>
 
         <div>
