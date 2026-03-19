@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { supabase } from "../../lib/supabase";
 import * as XLSX from "xlsx";
-import { saveAs } from "file-saver";
 
 const CLAVE_ADMIN = "tatiprofe";
 
@@ -40,19 +39,25 @@ export default function AdminEntregasPage() {
 
   async function cargarEntregas() {
     setLoading(true);
+
     const { data, error } = await supabase
       .from("vista_entregas_admin")
       .select("*")
       .order("fecha_entrega", { ascending: false });
 
-    if (error) setErrorMsg(error.message);
-    else setEntregas((data || []) as EntregaAdmin[]);
+    if (error) {
+      setErrorMsg(error.message);
+    } else {
+      setEntregas((data || []) as EntregaAdmin[]);
+    }
 
     setLoading(false);
   }
 
   useEffect(() => {
-    if (autorizado) cargarEntregas();
+    if (autorizado) {
+      cargarEntregas();
+    }
   }, [autorizado]);
 
   function entrarAdmin() {
@@ -72,11 +77,16 @@ export default function AdminEntregasPage() {
   ) {
     setMensaje("");
     setErrorMsg("");
+
     const nota = calificacion === "" ? null : Number(calificacion);
 
     const { error } = await supabase
       .from("entregas")
-      .update({ calificacion: nota, respuesta_docente, estado })
+      .update({
+        calificacion: nota,
+        respuesta_docente,
+        estado,
+      })
       .eq("id", id);
 
     if (error) {
@@ -89,12 +99,15 @@ export default function AdminEntregasPage() {
   }
 
   const gruposUnicos = useMemo(() => {
-    return Array.from(new Set(entregas.map((e) => e.grupo_nombre).filter(Boolean))) as string[];
+    return Array.from(
+      new Set(entregas.map((e) => e.grupo_nombre).filter(Boolean))
+    ) as string[];
   }, [entregas]);
 
   const filtradas = useMemo(() => {
     return entregas.filter((e) => {
-      const alumno = `${e.nombre || ""} ${e.apellido || ""} ${e.numero_estudiante || ""}`.toLowerCase();
+      const alumno =
+        `${e.nombre || ""} ${e.apellido || ""} ${e.numero_estudiante || ""}`.toLowerCase();
       const matchAlumno = alumno.includes(filtroAlumno.toLowerCase());
       const matchGrupo = !filtroGrupo || e.grupo_nombre === filtroGrupo;
       const matchEstado = !filtroEstado || e.estado === filtroEstado;
@@ -103,10 +116,21 @@ export default function AdminEntregasPage() {
   }, [entregas, filtroAlumno, filtroGrupo, filtroEstado]);
 
   const resumenPorAlumno = useMemo(() => {
-    const mapa = new Map<string, { alumno: string; grupo: string; cantidad: number; suma: number; conNota: number; promedio: number }>();
+    const mapa = new Map<
+      string,
+      {
+        alumno: string;
+        grupo: string;
+        cantidad: number;
+        suma: number;
+        conNota: number;
+        promedio: number;
+      }
+    >();
 
     for (const e of filtradas) {
       const key = `${e.numero_estudiante || ""}-${e.grupo_nombre || ""}`;
+
       if (!mapa.has(key)) {
         mapa.set(key, {
           alumno: `${e.nombre || ""} ${e.apellido || ""}`.trim(),
@@ -128,7 +152,10 @@ export default function AdminEntregasPage() {
     }
 
     for (const item of mapa.values()) {
-      item.promedio = item.conNota > 0 ? Number((item.suma / item.conNota).toFixed(2)) : 0;
+      item.promedio =
+        item.conNota > 0
+          ? Number((item.suma / item.conNota).toFixed(2))
+          : 0;
     }
 
     return Array.from(mapa.values());
@@ -164,11 +191,18 @@ export default function AdminEntregasPage() {
     XLSX.utils.book_append_sheet(wb, resumen, "Promedios");
 
     const excelBuffer = XLSX.write(wb, { bookType: "xlsx", type: "array" });
-    const fileData = new Blob([excelBuffer], {
+    const blob = new Blob([excelBuffer], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
 
-    saveAs(fileData, "entregas_admin.xlsx");
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "entregas_admin.xlsx";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    window.URL.revokeObjectURL(url);
   }
 
   if (!autorizado) {
@@ -260,8 +294,17 @@ export default function AdminEntregasPage() {
           </div>
         </div>
 
-        {mensaje && <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-700">{mensaje}</div>}
-        {errorMsg && <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700">{errorMsg}</div>}
+        {mensaje && (
+          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-emerald-700">
+            {mensaje}
+          </div>
+        )}
+
+        {errorMsg && (
+          <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-700">
+            {errorMsg}
+          </div>
+        )}
 
         <div className="rounded-[32px] border border-white/70 bg-white/85 p-6 shadow">
           <div className="grid gap-4 md:grid-cols-3">
@@ -279,7 +322,9 @@ export default function AdminEntregasPage() {
             >
               <option value="">Todos los grupos</option>
               {gruposUnicos.map((g) => (
-                <option key={g} value={g}>{g}</option>
+                <option key={g} value={g}>
+                  {g}
+                </option>
               ))}
             </select>
 
@@ -334,7 +379,11 @@ export default function AdminEntregasPage() {
                 <p className="text-slate-500">No hay entregas para mostrar.</p>
               ) : (
                 filtradas.map((e) => (
-                  <EntregaCard key={e.id} entrega={e} onGuardar={guardarCorreccion} />
+                  <EntregaCard
+                    key={e.id}
+                    entrega={e}
+                    onGuardar={guardarCorreccion}
+                  />
                 ))
               )}
             </div>
@@ -350,9 +399,16 @@ function EntregaCard({
   onGuardar,
 }: {
   entrega: EntregaAdmin;
-  onGuardar: (id: string, calificacion: string, respuesta: string, estado: string) => Promise<void>;
+  onGuardar: (
+    id: string,
+    calificacion: string,
+    respuesta: string,
+    estado: string
+  ) => Promise<void>;
 }) {
-  const [calificacion, setCalificacion] = useState(entrega.calificacion?.toString() || "");
+  const [calificacion, setCalificacion] = useState(
+    entrega.calificacion?.toString() || ""
+  );
   const [respuesta, setRespuesta] = useState(entrega.respuesta_docente || "");
   const [estado, setEstado] = useState(entrega.estado || "recibido");
 
@@ -367,16 +423,24 @@ function EntregaCard({
             {entrega.numero_estudiante} · {entrega.email}
           </p>
           <p className="mt-2 text-sm text-slate-600">
-            <span className="font-medium">Grupo:</span> {entrega.grupo_nombre || "-"}
+            <span className="font-medium">Grupo:</span>{" "}
+            {entrega.grupo_nombre || "-"}
           </p>
           <p className="text-sm text-slate-600">
-            <span className="font-medium">Entregable:</span> {entrega.entregable_titulo || entrega.titulo || "-"}
+            <span className="font-medium">Entregable:</span>{" "}
+            {entrega.entregable_titulo || entrega.titulo || "-"}
           </p>
           <p className="text-sm text-slate-600">
-            <span className="font-medium">Fecha entrega:</span> {entrega.fecha_entrega ? new Date(entrega.fecha_entrega).toLocaleString("es-UY") : "-"}
+            <span className="font-medium">Fecha entrega:</span>{" "}
+            {entrega.fecha_entrega
+              ? new Date(entrega.fecha_entrega).toLocaleString("es-UY")
+              : "-"}
           </p>
           <p className="text-sm text-slate-600">
-            <span className="font-medium">Vencimiento:</span> {entrega.fecha_limite ? new Date(entrega.fecha_limite).toLocaleString("es-UY") : "-"}
+            <span className="font-medium">Vencimiento:</span>{" "}
+            {entrega.fecha_limite
+              ? new Date(entrega.fecha_limite).toLocaleString("es-UY")
+              : "-"}
           </p>
         </div>
 
