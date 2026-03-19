@@ -52,8 +52,14 @@ export default function AdminEntregasPage() {
     setErrorMsg("");
 
     const [entregasRes, archivosRes] = await Promise.all([
-      supabase.from("vista_entregas_admin").select("*").order("fecha_entrega", { ascending: false }),
-      supabase.from("archivos_entrega").select("*").order("created_at", { ascending: false }),
+      supabase
+        .from("vista_entregas_admin")
+        .select("*")
+        .order("fecha_entrega", { ascending: false }),
+      supabase
+        .from("archivos_entrega")
+        .select("*")
+        .order("created_at", { ascending: false }),
     ]);
 
     if (entregasRes.error) {
@@ -115,20 +121,54 @@ export default function AdminEntregasPage() {
     await cargarEntregas();
   }
 
-  async function verArchivo(rutaArchivo: string, nombreArchivo: string) {
-    setMensaje("");
-    setErrorMsg("");
-
+  async function obtenerSignedUrl(rutaArchivo: string) {
     const { data, error } = await supabase.storage
       .from("entregas")
       .createSignedUrl(rutaArchivo, 60 * 10);
 
     if (error || !data?.signedUrl) {
-      setErrorMsg(error?.message || "No se pudo generar el acceso al archivo.");
-      return;
+      throw new Error(error?.message || "No se pudo generar acceso al archivo.");
     }
 
-    window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+    return data.signedUrl;
+  }
+
+  async function verArchivo(rutaArchivo: string) {
+    setMensaje("");
+    setErrorMsg("");
+
+    try {
+      const signedUrl = await obtenerSignedUrl(rutaArchivo);
+      window.open(signedUrl, "_blank", "noopener,noreferrer");
+    } catch (err: any) {
+      setErrorMsg(err.message || "No se pudo abrir el archivo.");
+    }
+  }
+
+  async function descargarArchivo(rutaArchivo: string, nombreArchivo: string) {
+    setMensaje("");
+    setErrorMsg("");
+
+    try {
+      const signedUrl = await obtenerSignedUrl(rutaArchivo);
+
+      const response = await fetch(signedUrl);
+      if (!response.ok) {
+        throw new Error("No se pudo descargar el archivo.");
+      }
+
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = nombreArchivo || "archivo";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (err: any) {
+      setErrorMsg(err.message || "No se pudo descargar el archivo.");
+    }
   }
 
   const gruposUnicos = useMemo(() => {
@@ -186,9 +226,7 @@ export default function AdminEntregasPage() {
 
     for (const item of mapa.values()) {
       item.promedio =
-        item.conNota > 0
-          ? Number((item.suma / item.conNota).toFixed(2))
-          : 0;
+        item.conNota > 0 ? Number((item.suma / item.conNota).toFixed(2)) : 0;
     }
 
     return Array.from(mapa.values());
@@ -412,9 +450,7 @@ export default function AdminEntregasPage() {
                 <p className="text-slate-500">No hay entregas para mostrar.</p>
               ) : (
                 filtradas.map((e) => {
-                  const archivosDeEntrega = archivos.filter(
-                    (a) => a.entrega_id === e.id
-                  );
+                  const archivosDeEntrega = archivos.filter((a) => a.entrega_id === e.id);
 
                   return (
                     <EntregaCard
@@ -423,6 +459,7 @@ export default function AdminEntregasPage() {
                       archivos={archivosDeEntrega}
                       onGuardar={guardarCorreccion}
                       onVerArchivo={verArchivo}
+                      onDescargarArchivo={descargarArchivo}
                     />
                   );
                 })
@@ -435,11 +472,19 @@ export default function AdminEntregasPage() {
   );
 }
 
+function formatearTamano(bytes: number | null) {
+  if (!bytes) return "-";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 function EntregaCard({
   entrega,
   archivos,
   onGuardar,
   onVerArchivo,
+  onDescargarArchivo,
 }: {
   entrega: EntregaAdmin;
   archivos: ArchivoEntrega[];
@@ -449,7 +494,8 @@ function EntregaCard({
     respuesta: string,
     estado: string
   ) => Promise<void>;
-  onVerArchivo: (rutaArchivo: string, nombreArchivo: string) => Promise<void>;
+  onVerArchivo: (rutaArchivo: string) => Promise<void>;
+  onDescargarArchivo: (rutaArchivo: string, nombreArchivo: string) => Promise<void>;
 }) {
   const [calificacion, setCalificacion] = useState(
     entrega.calificacion?.toString() || ""
@@ -468,12 +514,10 @@ function EntregaCard({
             {entrega.numero_estudiante} · {entrega.email}
           </p>
           <p className="mt-2 text-sm text-slate-600">
-            <span className="font-medium">Grupo:</span>{" "}
-            {entrega.grupo_nombre || "-"}
+            <span className="font-medium">Grupo:</span> {entrega.grupo_nombre || "-"}
           </p>
           <p className="text-sm text-slate-600">
-            <span className="font-medium">Entregable:</span>{" "}
-            {entrega.entregable_titulo || entrega.titulo || "-"}
+            <span className="font-medium">Entregable:</span> {entrega.entregable_titulo || entrega.titulo || "-"}
           </p>
           <p className="text-sm text-slate-600">
             <span className="font-medium">Fecha entrega:</span>{" "}
@@ -488,23 +532,44 @@ function EntregaCard({
               : "-"}
           </p>
 
-          <div className="mt-4 space-y-2">
+          <div className="mt-4 space-y-3">
             <p className="text-sm font-medium text-slate-700">Archivos del alumno</p>
 
             {archivos.length === 0 ? (
               <p className="text-sm text-slate-500">No hay archivo adjunto.</p>
             ) : (
               archivos.map((archivo) => (
-                <button
+                <div
                   key={archivo.id}
-                  type="button"
-                  onClick={() =>
-                    onVerArchivo(archivo.ruta_archivo, archivo.nombre_archivo)
-                  }
-                  className="block rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-left text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+                  className="rounded-2xl border border-slate-200 bg-slate-50 p-3"
                 >
-                  Ver archivo: {archivo.nombre_archivo}
-                </button>
+                  <p className="text-sm font-medium text-slate-800">
+                    {archivo.nombre_archivo}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Tipo: {archivo.tipo_archivo || "-"} · Tamaño: {formatearTamano(archivo.tamano_bytes)}
+                  </p>
+
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onVerArchivo(archivo.ruta_archivo)}
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+                    >
+                      Ver
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onDescargarArchivo(archivo.ruta_archivo, archivo.nombre_archivo)
+                      }
+                      className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-100"
+                    >
+                      Descargar
+                    </button>
+                  </div>
+                </div>
               ))
             )}
           </div>
